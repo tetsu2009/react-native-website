@@ -633,20 +633,17 @@ async def get_my_transactions(current_user: User = Depends(get_current_user)):
     
     return [Transaction(**transaction) for transaction in transactions]
 
-@api_router.get("/health")
-async def health_check():
-    """Detailed health check"""
-    try:
-        # Test database connection
-        await db.users.find_one()
-        db_status = "connected"
-    except Exception as e:
-        db_status = f"error: {str(e)}"
-    
+# ============================================================================
+# BASIC ENDPOINTS
+# ============================================================================
+
+@api_router.get("/")
+async def root():
+    """API Health Check"""
     return {
-        "api": "healthy",
-        "database": db_status,
-        "timestamp": datetime.utcnow()
+        "message": "Reality+ API is running!",
+        "version": "1.0.0",
+        "status": "healthy"
     }
 
 # Include the router in the main app
