@@ -379,17 +379,259 @@ async def update_user_profile(
     return UserResponse(**updated_user.dict())
 
 # ============================================================================
-# BASIC ENDPOINTS
+# MISSION MANAGEMENT ENDPOINTS
 # ============================================================================
 
-@api_router.get("/")
-async def root():
-    """API Health Check"""
-    return {
-        "message": "Reality+ API is running!",
-        "version": "1.0.0",
-        "status": "healthy"
+@api_router.get("/missions", response_model=List[Mission])
+async def get_available_missions():
+    """Get all available missions for users"""
+    missions = await db.missions.find({
+        "is_active": True,
+        "$or": [
+            {"available_until": None},
+            {"available_until": {"$gte": datetime.utcnow()}}
+        ]
+    }).to_list(100)
+    return [Mission(**mission) for mission in missions]
+
+@api_router.get("/missions/{mission_id}", response_model=Mission)
+async def get_mission(mission_id: str):
+    """Get a specific mission by ID"""
+    mission = await db.missions.find_one({"id": mission_id, "is_active": True})
+    if not mission:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Mission not found"
+        )
+    return Mission(**mission)
+
+@api_router.post("/missions", response_model=Mission, status_code=status.HTTP_201_CREATED)
+async def create_mission(
+    mission_data: MissionCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create a new mission (admin only for now)"""
+    
+    # Create mission
+    mission_dict = mission_data.dict()
+    mission_dict["created_by"] = current_user.id
+    
+    new_mission = Mission(**mission_dict)
+    
+    # Save to database
+    await db.missions.insert_one(new_mission.dict())
+    
+    return new_mission
+
+@api_router.get("/my-missions", response_model=List[dict])
+async def get_my_missions(current_user: User = Depends(get_current_user)):
+    """Get user's mission history and current submissions"""
+    
+    # Get user's submissions
+    submissions = await db.mission_submissions.find({
+        "user_id": current_user.id
+    }).to_list(100)
+    
+    # Get mission details for each submission
+    mission_history = []
+    for submission in submissions:
+        mission = await db.missions.find_one({"id": submission["mission_id"]})
+        if mission:
+            mission_history.append({
+                "mission": Mission(**mission),
+                "submission": MissionSubmission(**submission),
+                "status": submission["status"]
+            })
+    
+    return mission_history
+
+# ============================================================================
+# MISSION SUBMISSION ENDPOINTS
+# ============================================================================
+
+@api_router.post("/missions/{mission_id}/submit", response_model=MissionSubmission)
+async def submit_mission(
+    mission_id: str,
+    submission_data: MissionSubmissionCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Submit a completed mission"""
+    
+    # Verify mission exists
+    mission = await db.missions.find_one({"id": mission_id, "is_active": True})
+    if not mission:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Mission not found"
+        )
+    
+    mission_obj = Mission(**mission)
+    
+    # Check if user already submitted this mission recently (prevent spam)
+    existing_submission = await db.mission_submissions.find_one({
+        "user_id": current_user.id,
+        "mission_id": mission_id,
+        "status": {"$in": ["pending", "approved"]},
+        "submitted_at": {"$gte": datetime.utcnow() - timedelta(hours=24)}
+    })
+    
+    if existing_submission and not mission_obj.is_daily:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Mission already submitted recently"
+        )
+    
+    # Validate submission based on mission requirements
+    if mission_obj.requires_photo and len(submission_data.photos_base64) < mission_obj.min_photos:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Mission requires at least {mission_obj.min_photos} photos"
+        )
+    
+    if len(submission_data.photos_base64) > mission_obj.max_photos:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Maximum {mission_obj.max_photos} photos allowed"
+        )
+    
+    # Create submission
+    submission_dict = submission_data.dict()
+    submission_dict["user_id"] = current_user.id
+    
+    new_submission = MissionSubmission(**submission_dict)
+    
+    # Save to database
+    await db.mission_submissions.insert_one(new_submission.dict())
+    
+    # Update user stats
+    await db.users.update_one(
+        {"id": current_user.id},
+        {"$inc": {"missions_in_progress": 1}}
+    )
+    
+    return new_submission
+
+@api_router.get("/submissions", response_model=List[MissionSubmission])
+async def get_all_submissions(current_user: User = Depends(get_current_user)):
+    """Get all submissions for review (admin functionality)"""
+    submissions = await db.mission_submissions.find().to_list(100)
+    return [MissionSubmission(**submission) for submission in submissions]
+
+@api_router.put("/submissions/{submission_id}/review")
+async def review_submission(
+    submission_id: str,
+    status: Literal["approved", "rejected"],
+    review_notes: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Approve or reject a mission submission (admin only)"""
+    
+    # Get submission
+    submission_doc = await db.mission_submissions.find_one({"id": submission_id})
+    if not submission_doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Submission not found"
+        )
+    
+    submission = MissionSubmission(**submission_doc)
+    
+    # Get mission details for reward calculation
+    mission_doc = await db.missions.find_one({"id": submission.mission_id})
+    if not mission_doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Mission not found"
+        )
+    
+    mission = Mission(**mission_doc)
+    
+    # Update submission status
+    update_data = {
+        "status": status,
+        "review_notes": review_notes,
+        "reviewed_by": current_user.id,
+        "reviewed_at": datetime.utcnow()
     }
+    
+    if status == "approved":
+        update_data["completed_at"] = datetime.utcnow()
+    
+    await db.mission_submissions.update_one(
+        {"id": submission_id},
+        {"$set": update_data}
+    )
+    
+    # If approved, reward the user
+    if status == "approved":
+        # Get user
+        user_doc = await db.users.find_one({"id": submission.user_id})
+        if user_doc:
+            user = User(**user_doc)
+            
+            # Calculate new stats
+            new_xp = user.xp + mission.xp_reward
+            new_level = calculate_level_from_xp(new_xp)
+            new_balance = user.current_balance + mission.money_reward
+            new_total_earned = user.total_money_earned + mission.money_reward
+            
+            # Update user stats
+            await db.users.update_one(
+                {"id": submission.user_id},
+                {
+                    "$set": {
+                        "xp": new_xp,
+                        "level": new_level,
+                        "current_balance": new_balance,
+                        "total_money_earned": new_total_earned
+                    },
+                    "$inc": {
+                        "missions_completed": 1,
+                        "missions_in_progress": -1
+                    }
+                }
+            )
+            
+            # Create transaction record
+            transaction = Transaction(
+                user_id=submission.user_id,
+                mission_id=mission.id,
+                submission_id=submission_id,
+                type="mission_reward",
+                xp_amount=mission.xp_reward,
+                money_amount=mission.money_reward,
+                description=f"Récompense pour mission: {mission.title}"
+            )
+            
+            await db.transactions.insert_one(transaction.dict())
+            
+            # Update mission stats
+            await db.missions.update_one(
+                {"id": mission.id},
+                {"$inc": {"completion_count": 1}}
+            )
+    
+    elif status == "rejected":
+        # Update user stats (remove from in_progress)
+        await db.users.update_one(
+            {"id": submission.user_id},
+            {"$inc": {"missions_in_progress": -1}}
+        )
+    
+    return {"message": f"Submission {status} successfully", "status": status}
+
+# ============================================================================
+# TRANSACTION ENDPOINTS
+# ============================================================================
+
+@api_router.get("/my-transactions", response_model=List[Transaction])
+async def get_my_transactions(current_user: User = Depends(get_current_user)):
+    """Get user's transaction history"""
+    transactions = await db.transactions.find({
+        "user_id": current_user.id
+    }).sort("created_at", -1).to_list(50)
+    
+    return [Transaction(**transaction) for transaction in transactions]
 
 @api_router.get("/health")
 async def health_check():
