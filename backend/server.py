@@ -196,10 +196,187 @@ class Token(BaseModel):
     token_type: str
     user: UserResponse
 
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
-async def root():
-    return {"message": "Hello World"}
+# ============================================================================
+# AUTHENTICATION UTILITIES
+# ============================================================================
+
+def hash_password(password: str) -> str:
+    """Hash a password using bcrypt"""
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a password against its hash"""
+    return pwd_context.verify(plain_password, hashed_password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    """Create a JWT access token"""
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(hours=JWT_EXPIRATION_HOURS)
+    
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return encoded_jwt
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get current authenticated user from JWT token"""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    try:
+        payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+    except jwt.PyJWTError:
+        raise credentials_exception
+    
+    user = await db.users.find_one({"id": user_id})
+    if user is None:
+        raise credentials_exception
+    
+    return User(**user)
+
+def calculate_level_from_xp(xp: int) -> int:
+    """Calculate user level based on XP (100 XP per level)"""
+    return max(1, (xp // 100) + 1)
+
+async def user_exists(email: str, username: str) -> dict:
+    """Check if user exists by email or username"""
+    email_exists = await db.users.find_one({"email": email}) is not None
+    username_exists = await db.users.find_one({"username": username}) is not None
+    return {"email": email_exists, "username": username_exists}
+
+# ============================================================================
+# AUTHENTICATION ENDPOINTS
+# ============================================================================
+
+@api_router.post("/auth/register", response_model=Token, status_code=status.HTTP_201_CREATED)
+async def register_user(user_data: UserCreate):
+    """Register a new user"""
+    
+    # Check if user already exists
+    existing = await user_exists(user_data.email, user_data.username)
+    if existing["email"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    if existing["username"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already taken"
+        )
+    
+    # Create new user
+    user_dict = user_data.dict()
+    user_dict.pop("password")
+    user_dict["password_hash"] = hash_password(user_data.password)
+    
+    new_user = User(**user_dict)
+    
+    # Save to database
+    await db.users.insert_one(new_user.dict())
+    
+    # Create access token
+    access_token = create_access_token(data={"sub": new_user.id})
+    
+    # Return token with user data
+    user_response = UserResponse(**new_user.dict())
+    return Token(
+        access_token=access_token,
+        token_type="bearer",
+        user=user_response
+    )
+
+@api_router.post("/auth/login", response_model=Token)
+async def login_user(credentials: UserLogin):
+    """Login existing user"""
+    
+    # Find user by email
+    user_doc = await db.users.find_one({"email": credentials.email})
+    if not user_doc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password"
+        )
+    
+    user = User(**user_doc)
+    
+    # Verify password
+    if not verify_password(credentials.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password"
+        )
+    
+    # Check if account is active
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Account is deactivated"
+        )
+    
+    # Update last activity
+    await db.users.update_one(
+        {"id": user.id},
+        {"$set": {"last_activity": datetime.utcnow()}}
+    )
+    
+    # Create access token
+    access_token = create_access_token(data={"sub": user.id})
+    
+    # Return token with user data
+    user_response = UserResponse(**user.dict())
+    return Token(
+        access_token=access_token,
+        token_type="bearer",
+        user=user_response
+    )
+
+@api_router.get("/auth/me", response_model=UserResponse)
+async def get_current_user_profile(current_user: User = Depends(get_current_user)):
+    """Get current user profile"""
+    return UserResponse(**current_user.dict())
+
+@api_router.put("/auth/profile", response_model=UserResponse)
+async def update_user_profile(
+    first_name: Optional[str] = None,
+    last_name: Optional[str] = None,
+    phone_number: Optional[str] = None,
+    avatar_base64: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Update user profile"""
+    
+    update_data = {}
+    if first_name is not None:
+        update_data["first_name"] = first_name
+    if last_name is not None:
+        update_data["last_name"] = last_name
+    if phone_number is not None:
+        update_data["phone_number"] = phone_number
+    if avatar_base64 is not None:
+        update_data["avatar_base64"] = avatar_base64
+    
+    update_data["updated_at"] = datetime.utcnow()
+    
+    # Update in database
+    await db.users.update_one(
+        {"id": current_user.id},
+        {"$set": update_data}
+    )
+    
+    # Get updated user
+    updated_user_doc = await db.users.find_one({"id": current_user.id})
+    updated_user = User(**updated_user_doc)
+    
+    return UserResponse(**updated_user.dict())
 
 # Include the router in the main app
 app.include_router(api_router)
