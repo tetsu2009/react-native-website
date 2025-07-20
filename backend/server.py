@@ -23,8 +23,17 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
+# JWT Configuration
+JWT_SECRET = os.environ.get('JWT_SECRET', secrets.token_hex(32))
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRATION_HOURS = 24
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+security = HTTPBearer()
+
 # Create the main app without a prefix
-app = FastAPI()
+app = FastAPI(title="Reality+ API", description="API pour l'application Reality+")
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
