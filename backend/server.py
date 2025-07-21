@@ -188,7 +188,7 @@ class Transaction(BaseModel):
     submission_id: Optional[str] = None
     
     # Transaction details
-    type: Literal["mission_reward", "bonus", "withdrawal", "refund"]
+    type: Literal["mission_reward", "bonus", "withdrawal", "refund", "premium_upgrade"]
     xp_amount: int = 0
     money_amount: float = 0.0
     description: str
