@@ -646,6 +646,22 @@ async def root():
         "status": "healthy"
     }
 
+@api_router.get("/health")
+async def health_check():
+    """Detailed health check"""
+    try:
+        # Test database connection
+        await db.users.find_one()
+        db_status = "connected"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+    
+    return {
+        "api": "healthy",
+        "database": db_status,
+        "timestamp": datetime.utcnow()
+    }
+
 # Include the router in the main app
 app.include_router(api_router)
 
