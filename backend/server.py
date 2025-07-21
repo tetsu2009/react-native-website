@@ -53,6 +53,11 @@ class User(BaseModel):
     phone_number: Optional[str] = None
     avatar_base64: Optional[str] = None
     
+    # Premium System
+    premium_tier: Literal["free", "bronze", "silver", "gold"] = "free"
+    premium_expires: Optional[datetime] = None
+    premium_multiplier: float = 1.0  # 1.0=free, 1.5=bronze, 2.0=silver, 3.0=gold
+    
     # Gamification
     xp: int = 0
     level: int = 1
