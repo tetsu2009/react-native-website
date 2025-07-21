@@ -690,12 +690,20 @@ async def review_submission(
         user_doc = await db.users.find_one({"id": submission.user_id})
         if user_doc:
             user = User(**user_doc)
+            user = update_user_premium_status(user)  # Update premium status
+            
+            # Calculate rewards with premium multiplier
+            base_xp = mission.xp_reward
+            base_money = mission.money_reward
+            
+            final_xp = int(base_xp * user.premium_multiplier)
+            final_money = round(base_money * user.premium_multiplier, 2)
             
             # Calculate new stats
-            new_xp = user.xp + mission.xp_reward
+            new_xp = user.xp + final_xp
             new_level = calculate_level_from_xp(new_xp)
-            new_balance = user.current_balance + mission.money_reward
-            new_total_earned = user.total_money_earned + mission.money_reward
+            new_balance = user.current_balance + final_money
+            new_total_earned = user.total_money_earned + final_money
             
             # Update user stats
             await db.users.update_one(
@@ -705,7 +713,10 @@ async def review_submission(
                         "xp": new_xp,
                         "level": new_level,
                         "current_balance": new_balance,
-                        "total_money_earned": new_total_earned
+                        "total_money_earned": new_total_earned,
+                        "premium_tier": user.premium_tier,
+                        "premium_expires": user.premium_expires,
+                        "premium_multiplier": user.premium_multiplier
                     },
                     "$inc": {
                         "missions_completed": 1,
@@ -715,14 +726,15 @@ async def review_submission(
             )
             
             # Create transaction record
+            multiplier_text = f" (x{user.premium_multiplier} Premium)" if user.premium_multiplier > 1.0 else ""
             transaction = Transaction(
                 user_id=submission.user_id,
                 mission_id=mission.id,
                 submission_id=submission_id,
                 type="mission_reward",
-                xp_amount=mission.xp_reward,
-                money_amount=mission.money_reward,
-                description=f"Récompense pour mission: {mission.title}"
+                xp_amount=final_xp,
+                money_amount=final_money,
+                description=f"Récompense pour mission: {mission.title}{multiplier_text}"
             )
             
             await db.transactions.insert_one(transaction.dict())
