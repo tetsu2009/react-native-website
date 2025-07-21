@@ -96,6 +96,9 @@ class UserResponse(BaseModel):
     last_name: str
     phone_number: Optional[str]
     avatar_base64: Optional[str]
+    premium_tier: str
+    premium_expires: Optional[datetime]
+    premium_multiplier: float
     xp: int
     level: int
     total_money_earned: float
