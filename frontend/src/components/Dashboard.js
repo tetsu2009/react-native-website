@@ -3,12 +3,14 @@ import { useAuth } from '../contexts/AuthContext';
 import MissionsList from './MissionsList';
 import MissionModal from './MissionModal';
 import CreateMissionModal from './CreateMissionModal';
+import PremiumModal from './PremiumModal';
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
   const [selectedMission, setSelectedMission] = useState(null);
   const [showMissionModal, setShowMissionModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
   const [activeTab, setActiveTab] = useState('missions');
 
   const formatMoney = (amount) => {
@@ -41,6 +43,30 @@ const Dashboard = () => {
     // TODO: Refresh missions list
   };
 
+  const handleUpgradeSuccess = (upgradeData) => {
+    console.log('Premium upgrade successful:', upgradeData);
+    // TODO: Refresh user data to show new premium status
+  };
+
+  const getPremiumBadge = () => {
+    if (user?.premium_tier === 'free') return null;
+    
+    const badges = {
+      bronze: { icon: '🥉', class: 'bg-orange-500 text-white' },
+      silver: { icon: '🥈', class: 'bg-gray-500 text-white' },
+      gold: { icon: '🥇', class: 'bg-yellow-500 text-white' }
+    };
+
+    const badge = badges[user?.premium_tier];
+    if (!badge) return null;
+
+    return (
+      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-bold ${badge.class}`}>
+        {badge.icon} {user.premium_tier.toUpperCase()}
+      </span>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -52,12 +78,23 @@ const Dashboard = () => {
                 <span className="text-xl font-bold">R+</span>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">Reality+</h1>
+                <div className="flex items-center space-x-2">
+                  <h1 className="text-2xl font-bold text-gray-900">Reality+</h1>
+                  {getPremiumBadge()}
+                </div>
                 <p className="text-sm text-gray-600">Tu bouges ? Tu aides ? Tu gagnes.</p>
               </div>
             </div>
             
             <div className="flex items-center space-x-4">
+              {user?.premium_tier === 'free' && (
+                <button
+                  onClick={() => setShowPremiumModal(true)}
+                  className="bg-gradient-to-r from-yellow-400 to-orange-500 text-white px-4 py-2 rounded-lg font-medium hover:from-yellow-500 hover:to-orange-600 transition-all duration-200 shadow-lg"
+                >
+                  ⭐ Premium
+                </button>
+              )}
               <button
                 onClick={() => setShowCreateModal(true)}
                 className="bg-gradient-to-r from-green-500 to-blue-500 text-white px-4 py-2 rounded-lg font-medium hover:from-green-600 hover:to-blue-600 transition-all duration-200"
@@ -104,6 +141,12 @@ const Dashboard = () => {
                   <p className="text-blue-100 text-sm">Série</p>
                   <p className="text-2xl font-bold">{user?.streak_days} jours</p>
                 </div>
+                {user?.premium_tier !== 'free' && (
+                  <div>
+                    <p className="text-blue-100 text-sm">Multiplicateur</p>
+                    <p className="text-2xl font-bold text-yellow-300">x{user?.premium_multiplier}</p>
+                  </div>
+                )}
               </div>
             </div>
             <div className="mt-6 md:mt-0">
@@ -113,6 +156,13 @@ const Dashboard = () => {
                 <p className="text-blue-100 text-sm mt-2">
                   Total gagné: {formatMoney(user?.total_money_earned || 0)}
                 </p>
+                {user?.premium_tier !== 'free' && (
+                  <div className="mt-2 bg-yellow-400 bg-opacity-20 rounded px-2 py-1">
+                    <p className="text-yellow-100 text-xs font-semibold">
+                      Gains Premium actifs !
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -165,6 +215,26 @@ const Dashboard = () => {
           </div>
         </div>
 
+        {/* Premium CTA for Free Users */}
+        {user?.premium_tier === 'free' && (
+          <div className="bg-gradient-to-r from-yellow-400 to-orange-500 text-white rounded-2xl p-6 mb-8">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between">
+              <div>
+                <h3 className="text-xl font-bold mb-2">🚀 Multipliez vos gains avec Premium !</h3>
+                <p className="text-yellow-100">
+                  Gagnez jusqu'à 3x plus d'argent sur chaque mission avec nos offres Premium.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowPremiumModal(true)}
+                className="mt-4 md:mt-0 bg-white text-orange-600 px-6 py-3 rounded-lg font-bold hover:bg-orange-50 transition-colors"
+              >
+                Voir les offres ⭐
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Tab Navigation */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-6">
           <div className="border-b border-gray-200">
@@ -198,7 +268,38 @@ const Dashboard = () => {
             )}
 
             {activeTab === 'profile' && (
-              <div className="space-y-4">
+              <div className="space-y-6">
+                {/* Premium Status */}
+                {user?.premium_tier !== 'free' && (
+                  <div className="bg-gradient-to-r from-purple-100 to-pink-100 border border-purple-200 rounded-xl p-4 mb-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div className="text-2xl">
+                          {user.premium_tier === 'bronze' && '🥉'}
+                          {user.premium_tier === 'silver' && '🥈'}
+                          {user.premium_tier === 'gold' && '🥇'}
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-purple-900">
+                            Membre {user.premium_tier.charAt(0).toUpperCase() + user.premium_tier.slice(1)} Premium
+                          </h3>
+                          <p className="text-purple-700 text-sm">
+                            Multiplicateur actuel: x{user.premium_multiplier}
+                          </p>
+                        </div>
+                      </div>
+                      {user?.premium_expires && (
+                        <div className="text-right">
+                          <p className="text-purple-700 text-sm">Expire le:</p>
+                          <p className="font-semibold text-purple-900">
+                            {new Date(user.premium_expires).toLocaleDateString('fr-FR')}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Informations du Profil</h3>
                 <div className="space-y-4">
                   <div className="flex justify-between items-center py-2 border-b border-gray-100">
@@ -243,6 +344,12 @@ const Dashboard = () => {
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         onMissionCreated={handleMissionCreated}
+      />
+
+      <PremiumModal
+        isOpen={showPremiumModal}
+        onClose={() => setShowPremiumModal(false)}
+        onUpgradeSuccess={handleUpgradeSuccess}
       />
     </div>
   );
