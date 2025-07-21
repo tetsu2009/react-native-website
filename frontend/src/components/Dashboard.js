@@ -1,8 +1,15 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import MissionsList from './MissionsList';
+import MissionModal from './MissionModal';
+import CreateMissionModal from './CreateMissionModal';
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
+  const [selectedMission, setSelectedMission] = useState(null);
+  const [showMissionModal, setShowMissionModal] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [activeTab, setActiveTab] = useState('missions');
 
   const formatMoney = (amount) => {
     return new Intl.NumberFormat('fr-FR', {
@@ -16,6 +23,22 @@ const Dashboard = () => {
       dateStyle: 'medium',
       timeStyle: 'short'
     }).format(new Date(dateString));
+  };
+
+  const handleSelectMission = (mission) => {
+    setSelectedMission(mission);
+    setShowMissionModal(true);
+  };
+
+  const handleSubmissionSuccess = () => {
+    // Refresh user data or show success message
+    console.log('Mission submitted successfully!');
+    // TODO: Refresh missions list if needed
+  };
+
+  const handleMissionCreated = (newMission) => {
+    console.log('New mission created:', newMission);
+    // TODO: Refresh missions list
   };
 
   return (
@@ -35,6 +58,12 @@ const Dashboard = () => {
             </div>
             
             <div className="flex items-center space-x-4">
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="bg-gradient-to-r from-green-500 to-blue-500 text-white px-4 py-2 rounded-lg font-medium hover:from-green-600 hover:to-blue-600 transition-all duration-200"
+              >
+                + Créer Mission
+              </button>
               <div className="text-right">
                 <p className="text-sm text-gray-600">Bienvenue,</p>
                 <p className="font-semibold text-gray-900">{user?.first_name}</p>
@@ -136,52 +165,85 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Coming Soon Sections */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Missions Available */}
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Missions Disponibles</h3>
-            <div className="text-center py-12">
-              <div className="bg-gray-100 p-4 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-                <svg className="w-8 h-8 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                </svg>
-              </div>
-              <p className="text-gray-600 mb-2">Missions en développement</p>
-              <p className="text-sm text-gray-500">
-                Bientôt disponible ! Des missions photos, marche, recyclage et aide.
-              </p>
-            </div>
+        {/* Tab Navigation */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-6">
+          <div className="border-b border-gray-200">
+            <nav className="flex space-x-8 px-6">
+              <button
+                onClick={() => setActiveTab('missions')}
+                className={`py-4 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === 'missions'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                🎯 Missions Disponibles
+              </button>
+              <button
+                onClick={() => setActiveTab('profile')}
+                className={`py-4 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === 'profile'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                👤 Mon Profil
+              </button>
+            </nav>
           </div>
 
-          {/* Profile Settings */}
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Informations du Profil</h3>
-            <div className="space-y-4">
-              <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                <span className="text-gray-600">Email</span>
-                <span className="text-gray-900 font-medium">{user?.email}</span>
+          <div className="p-6">
+            {activeTab === 'missions' && (
+              <MissionsList onSelectMission={handleSelectMission} />
+            )}
+
+            {activeTab === 'profile' && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Informations du Profil</h3>
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                    <span className="text-gray-600">Email</span>
+                    <span className="text-gray-900 font-medium">{user?.email}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                    <span className="text-gray-600">Nom d'utilisateur</span>
+                    <span className="text-gray-900 font-medium">{user?.username}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                    <span className="text-gray-600">Téléphone</span>
+                    <span className="text-gray-900 font-medium">
+                      {user?.phone_number || 'Non renseigné'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center py-2">
+                    <span className="text-gray-600">Membre depuis</span>
+                    <span className="text-gray-900 font-medium">
+                      {user?.created_at ? formatDate(user.created_at) : 'Récemment'}
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                <span className="text-gray-600">Nom d'utilisateur</span>
-                <span className="text-gray-900 font-medium">{user?.username}</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                <span className="text-gray-600">Téléphone</span>
-                <span className="text-gray-900 font-medium">
-                  {user?.phone_number || 'Non renseigné'}
-                </span>
-              </div>
-              <div className="flex justify-between items-center py-2">
-                <span className="text-gray-600">Membre depuis</span>
-                <span className="text-gray-900 font-medium">
-                  {user?.created_at ? formatDate(user.created_at) : 'Récemment'}
-                </span>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       </main>
+
+      {/* Modals */}
+      <MissionModal
+        mission={selectedMission}
+        isOpen={showMissionModal}
+        onClose={() => {
+          setShowMissionModal(false);
+          setSelectedMission(null);
+        }}
+        onSubmissionSuccess={handleSubmissionSuccess}
+      />
+
+      <CreateMissionModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onMissionCreated={handleMissionCreated}
+      />
     </div>
   );
 };
