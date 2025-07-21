@@ -250,6 +250,120 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     
     return User(**user)
 
+def get_premium_multiplier(tier: str) -> float:
+    """Get reward multiplier based on premium tier"""
+    multipliers = {
+        "free": 1.0,
+        "bronze": 1.5,  # +50% gains
+        "silver": 2.0,  # +100% gains
+        "gold": 3.0     # +200% gains
+    }
+    return multipliers.get(tier, 1.0)
+
+def update_user_premium_status(user: User) -> User:
+    """Update user premium status and multiplier"""
+    if user.premium_expires and user.premium_expires < datetime.utcnow():
+        user.premium_tier = "free"
+        user.premium_expires = None
+    
+    user.premium_multiplier = get_premium_multiplier(user.premium_tier)
+    return user
+
+# ============================================================================
+# PREMIUM SYSTEM ENDPOINTS
+# ============================================================================
+
+@api_router.get("/premium/tiers")
+async def get_premium_tiers():
+    """Get available premium tiers"""
+    return {
+        "tiers": [
+            {
+                "name": "free",
+                "display_name": "Gratuit",
+                "multiplier": 1.0,
+                "price_monthly": 0,
+                "benefits": ["Missions de base", "Gains standard"]
+            },
+            {
+                "name": "bronze",
+                "display_name": "Bronze",
+                "multiplier": 1.5,
+                "price_monthly": 4.99,
+                "benefits": ["Missions de base", "+50% gains", "Support prioritaire"]
+            },
+            {
+                "name": "silver", 
+                "display_name": "Silver",
+                "multiplier": 2.0,
+                "price_monthly": 9.99,
+                "benefits": ["Toutes missions", "+100% gains", "Missions exclusives", "Support prioritaire"]
+            },
+            {
+                "name": "gold",
+                "display_name": "Gold",
+                "multiplier": 3.0,
+                "price_monthly": 19.99,
+                "benefits": ["Toutes missions", "+200% gains", "Missions VIP", "Support 24/7", "Bonus quotidien"]
+            }
+        ]
+    }
+
+@api_router.post("/premium/upgrade")
+async def upgrade_premium(
+    tier: Literal["bronze", "silver", "gold"],
+    duration_months: int = 1,
+    current_user: User = Depends(get_current_user)
+):
+    """Upgrade user to premium tier (mock payment for demo)"""
+    
+    if tier == "free":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot upgrade to free tier"
+        )
+    
+    # Calculate expiration date
+    if current_user.premium_expires and current_user.premium_expires > datetime.utcnow():
+        # Extend existing premium
+        new_expiration = current_user.premium_expires + timedelta(days=30 * duration_months)
+    else:
+        # New premium subscription
+        new_expiration = datetime.utcnow() + timedelta(days=30 * duration_months)
+    
+    # Update user premium status
+    await db.users.update_one(
+        {"id": current_user.id},
+        {
+            "$set": {
+                "premium_tier": tier,
+                "premium_expires": new_expiration,
+                "premium_multiplier": get_premium_multiplier(tier),
+                "updated_at": datetime.utcnow()
+            }
+        }
+    )
+    
+    # Create transaction record
+    prices = {"bronze": 4.99, "silver": 9.99, "gold": 19.99}
+    total_price = prices[tier] * duration_months
+    
+    transaction = Transaction(
+        user_id=current_user.id,
+        type="premium_upgrade",
+        money_amount=-total_price,  # Negative because it's a payment
+        description=f"Upgrade vers {tier.title()} Premium - {duration_months} mois"
+    )
+    
+    await db.transactions.insert_one(transaction.dict())
+    
+    return {
+        "message": f"Félicitations ! Vous êtes maintenant {tier.title()} Premium",
+        "tier": tier,
+        "expires": new_expiration,
+        "multiplier": get_premium_multiplier(tier)
+    }
+
 def calculate_level_from_xp(xp: int) -> int:
     """Calculate user level based on XP (100 XP per level)"""
     return max(1, (xp // 100) + 1)
